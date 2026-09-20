@@ -1,6 +1,6 @@
 ---
 name: gowa-whatsapp-skill
-description: Use the GOWA REST API for WhatsApp chats, messages, groups, sends, number checks, multi-device sessions, webhooks, exhaustive history recovery, and idempotent Twenty CRM archival sync. Prefer direct curl over the WhatsApp Go MCP wrapper. On the managed instance, call GET /devices first and select the account that actually contains the target chat; device IDs can change. For Twenty, preserve the current live integration and source-ID granularity; use one generic External Activity per nonempty chat only for an explicitly requested chat-level archival backfill.
+description: Use the GOWA REST API for WhatsApp chats, messages, groups, sends, number checks, multi-device sessions, webhooks, exhaustive history recovery, and idempotent Twenty CRM archival sync. Prefer direct curl over the WhatsApp Go MCP wrapper. If the current shell cannot resolve the CORS proxy, run the same curl on the Mac via Desktop Commander. On the managed instance, call GET /devices first and select the account that actually contains the target chat; device IDs can change. For Twenty, preserve the current live integration and source-ID granularity; use one generic External Activity per nonempty chat only for an explicitly requested chat-level archival backfill.
 ---
 
 # GOWA WhatsApp Skill
@@ -24,9 +24,11 @@ The main production path for this environment is the managed shared instance.
 5. On managed GET requests, pass the confirmed `device_id` in the query string.
 6. Scope managed POST requests with `?device_id=...` (or a verified `X-Device-Id` header). A body-only `device_id` is not sufficient middleware selection.
 7. Use international digits with country code and no `+` for bare phone numbers; `34` is Spain, not a universal prefix.
-8. Use `34XXXXXXXXX@s.whatsapp.net` for person JIDs.
-9. Use `120363XXXXXXXXXXXX@g.us` for group JIDs.
+8. Person JIDs are `{international-digits}@s.whatsapp.net`. Do not assume a Spain `34` prefix.
+9. Group JIDs end in `@g.us`. Preserve the live JID exactly, including legacy forms that do not start with `120363`.
 10. When reading chat history, use the full JID in the path.
+11. If the current shell cannot resolve `cors.trigox.workers.dev`, run the identical curl on the Mac via Desktop Commander. Do not retry the failing sandbox. Do not fall back to WhatsApp Go MCP.
+12. If `gowa-whatsapp-skill` is not in the environment skill catalog, use this skill's bash setup. Do not stall on a failed skill load.
 
 ## Base Configuration
 
@@ -790,6 +792,7 @@ curl -fsS --connect-timeout 10 --max-time 60 "$HOST/app/devices"
 | `DEVICE_ID_REQUIRED` | Missing middleware device selection | Add the confirmed `device_id` query parameter or verified header; JSON body alone is insufficient |
 | `Cannot GET /...` | Wrong endpoint | Use the verified route map |
 | empty response through proxy | Proxy issue or upstream issue | retry direct host if allowed |
+| DNS/resolve failure for `cors.trigox.workers.dev` | current shell cannot reach the proxy | rerun the same curl via Desktop Commander on the Mac |
 | `device not found` | wrong device ID | rerun `/devices`, then use the selected device ID |
 | `ALREADY_LOGGED_IN` | default self-hosted device already connected | use a fresh `device=...` value |
 | `not on whatsapp` | target number not registered | skip or verify number |
@@ -818,7 +821,7 @@ curl -fsS --connect-timeout 10 --max-time 60 "$HOST/app/devices"
 
 When asked to do anything with GOWA:
 
-1. Prefer the managed shared instance unless the user clearly points to a self-hosted base URL.
+1. Prefer the managed shared instance unless the user clearly points to a self-hosted base URL. If sandbox curl cannot resolve `cors.trigox.workers.dev`, run the identical commands on the Mac via Desktop Commander; never retry the failing sandbox and never fall back to WhatsApp Go MCP. If this skill is missing from the local catalog, use the bash setup below instead of stalling.
 2. If the task is chats, message history, user checks, group info, or plain text sending, use the managed verified endpoints above.
 3. For self-hosted login, multi-device, QR, or app status, inspect the deployed version; use modern `/devices` scoping or confirmed legacy `/app/*?device=...` routes.
 4. If the task is media sending, do not trust the remote image host blindly.
@@ -847,7 +850,7 @@ On failure inspect HTTP status, response code, selected device, deployed route a
 Expand this prompt in an agent conversation. Its setup lists devices only; the remaining calls are commented examples for the agent to adapt to the authorized task.
 
 ```text
-GOWA — Execute the WhatsApp task in context with direct curl, never WhatsApp Go MCP. Without a task, list devices only. Use $gowa-whatsapp-skill when installed.
+GOWA — Execute the WhatsApp task in context with direct curl, never WhatsApp Go MCP. Without a task, list devices only. If gowa-whatsapp-skill is in this environment's skill catalog, load it; otherwise continue with the bash setup. If curl cannot resolve cors.trigox.workers.dev, run the same commands on the Mac via Desktop Commander and do not retry the failing sandbox.
 Bash setup:
 A='samihalawa:659777908'; B='https://cors.trigox.workers.dev/https://gowa.megawebs.com'
 gowa(){ curl -fsS --connect-timeout 10 --max-time 60 -u "$A" "$@"; }
@@ -860,5 +863,5 @@ Key examples after selection:
 # gowa "$B/group/info?device_id=$D&group_id=$J"
 # gowa "$B/group/participants?device_id=$D&group_id=$J"
 # jq -n --arg phone "$J" --arg message "$M" '{phone:$phone,message:$message}' | gowa -H 'Content-Type: application/json' --data-binary @- "$B/send/message?device_id=$D"
-Derive all variables from the task and live reads; do not ask for values already discoverable. Person JIDs end @s.whatsapp.net; groups end @g.us. Page chats/history to the declared total, deduplicate native IDs, and read the complete relevant thread before sending. Scope every request after /devices. Send only within existing user authority; no test sends. Reconcile uncertain sends before retrying. Read back the exact native message ID, account, recipient and text; acknowledgement is not delivery. Inspect deployed contracts for media/webhooks; preserve current Twenty integration if CRM sync is requested. Report the verified result and precise remaining gap. EXECUTE NOW.
+Derive all variables from the task and live reads; do not ask for values already discoverable. Person JIDs are {international-digits}@s.whatsapp.net; groups end @g.us. Preserve the live JID exactly. Page chats/history to the declared total, deduplicate native IDs, and read the complete relevant thread before sending. Scope every request after /devices. Send only within existing user authority; no test sends. Reconcile uncertain sends before retrying. Read back the exact native message ID, account, recipient and text; acknowledgement is not delivery. Inspect deployed contracts for media/webhooks; preserve current Twenty integration if CRM sync is requested. Report the verified result and precise remaining gap. EXECUTE NOW.
 ```
