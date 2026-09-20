@@ -847,19 +847,18 @@ On failure inspect HTTP status, response code, selected device, deployed route a
 Expand this prompt in an agent conversation. Its setup lists devices only; the remaining calls are commented examples for the agent to adapt to the authorized task.
 
 ```text
-GOWA — Execute the WhatsApp task already supplied using direct curl, never WhatsApp Go MCP. If no task is supplied, list devices and report connection state only. Use $gowa-whatsapp-skill when installed.
-Bash setup and key calls:
-export GOWA_BASIC_AUTH='samihalawa:659777908'
-export GOWA_URL='https://cors.trigox.workers.dev/https://gowa.megawebs.com'
-curl -fsS --connect-timeout 10 --max-time 60 -u "$GOWA_BASIC_AUTH" "$GOWA_URL/devices"
-# Select the logged-in account containing the target chat; set D to its literal ID, J to the full chat JID, P to international phone digits, M to the authorized text.
-# Key read examples after selection:
-# curl -fsS -u "$GOWA_BASIC_AUTH" "$GOWA_URL/chats?device_id=$D&limit=100&offset=0"
-# curl -fsS -u "$GOWA_BASIC_AUTH" "$GOWA_URL/chat/$J/messages?device_id=$D&limit=100&offset=0"
-# curl -fsS -u "$GOWA_BASIC_AUTH" --get "$GOWA_URL/user/check" --data-urlencode "device_id=$D" --data-urlencode "phone=$P"
-# curl -fsS -u "$GOWA_BASIC_AUTH" --get "$GOWA_URL/group/info" --data-urlencode "device_id=$D" --data-urlencode "group_id=$J"
-# curl -fsS -u "$GOWA_BASIC_AUTH" --get "$GOWA_URL/group/participants" --data-urlencode "device_id=$D" --data-urlencode "group_id=$J"
-# Authorized send example:
-# jq -n --arg phone "$J" --arg message "$M" '{phone:$phone,message:$message,is_forwarded:false}' | curl -fsS --connect-timeout 10 --max-time 60 -u "$GOWA_BASIC_AUTH" -H 'Content-Type: application/json' --data-binary @- "$GOWA_URL/send/message?device_id=$D"
+GOWA — Execute the WhatsApp task in context with direct curl, never WhatsApp Go MCP. Without a task, list devices only. Use $gowa-whatsapp-skill when installed.
+Bash setup:
+A='samihalawa:659777908'; B='https://cors.trigox.workers.dev/https://gowa.megawebs.com'
+gowa(){ curl -fsS --connect-timeout 10 --max-time 60 -u "$A" "$@"; }
+gowa "$B/devices"
+Select the logged-in account holding the target chat. Set D=its literal device ID, J=full chat JID, P=international phone digits, M=authorized message from live context.
+Key examples after selection:
+# gowa "$B/chats?device_id=$D&limit=100&offset=0"
+# gowa "$B/chat/$J/messages?device_id=$D&limit=100&offset=0"
+# gowa "$B/user/check?device_id=$D&phone=$P"
+# gowa "$B/group/info?device_id=$D&group_id=$J"
+# gowa "$B/group/participants?device_id=$D&group_id=$J"
+# jq -n --arg phone "$J" --arg message "$M" '{phone:$phone,message:$message}' | gowa -H 'Content-Type: application/json' --data-binary @- "$B/send/message?device_id=$D"
 Derive all variables from the task and live reads; do not ask for values already discoverable. Person JIDs end @s.whatsapp.net; groups end @g.us. Page chats/history to the declared total, deduplicate native IDs, and read the complete relevant thread before sending. Scope every request after /devices. Send only within existing user authority; no test sends. Reconcile uncertain sends before retrying. Read back the exact native message ID, account, recipient and text; acknowledgement is not delivery. Inspect deployed contracts for media/webhooks; preserve current Twenty integration if CRM sync is requested. Report the verified result and precise remaining gap. EXECUTE NOW.
 ```
