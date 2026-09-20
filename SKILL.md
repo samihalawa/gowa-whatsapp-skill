@@ -346,6 +346,8 @@ Parameters:
 - `device_id` required
 - `phone` required, bare digits only
 
+Require `.results.is_on_whatsapp == true`; the presence of a `jid` field is not a registration check.
+
 Typical use:
 
 - check availability before outreach
@@ -359,6 +361,8 @@ curl -fsS --connect-timeout 10 --max-time 60 -u "$GOWA_BASIC_AUTH" \
 ```
 
 ### 6. Group Participants
+
+Some participants may have `@lid` identifiers. Preserve them as provider IDs; do not invent a phone number or merge a contact by display name.
 
 ```bash
 curl -fsS --connect-timeout 10 --max-time 60 -u "$GOWA_BASIC_AUTH" \
@@ -782,6 +786,8 @@ curl -fsS --connect-timeout 10 --max-time 60 "$HOST/app/devices"
 
 | Error | Meaning | Fix |
 |---|---|---|
+| `401 Unauthorized` | Missing or incorrect Basic Auth | Use the current Base Configuration and `-u "$GOWA_BASIC_AUTH"` |
+| `DEVICE_ID_REQUIRED` | Missing middleware device selection | Add the confirmed `device_id` query parameter or verified header; JSON body alone is insufficient |
 | `Cannot GET /...` | Wrong endpoint | Use the verified route map |
 | empty response through proxy | Proxy issue or upstream issue | retry direct host if allowed |
 | `device not found` | wrong device ID | rerun `/devices`, then use the selected device ID |
