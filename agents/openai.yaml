@@ -1,4 +1,4 @@
 interface:
-  display_name: "GOWA WhatsApp API"
-  short_description: "Use direct curl calls to GOWA for WhatsApp chats, groups, self-hosted webhooks, and outreach"
-  default_prompt: "Use $gowa-whatsapp-api for WhatsApp automation. Prefer direct GOWA API calls over an MCP wrapper and verify /devices first. For routine Twenty synchronization, run one daily delta job: cache normalized Twenty Person phones, discard unmatched and non-direct chats before AI, classify each changed matched conversation once, upsert one generic WHATSAPP External Activity by gowa:<device>:<jid>, read it back, then checkpoint; an immediate replay must do zero work. Use exhaustive all-chat history recovery only when explicitly requested. Never create one CRM record per message or duplicate history into Notes."
+  display_name: "GOWA WhatsApp"
+  short_description: "Read, send, and verify WhatsApp activity with direct GOWA API calls"
+  default_prompt: "Use $gowa-whatsapp-skill and its embedded managed configuration. Call /devices, verify the target account, scope every chat/send request, paginate fully, construct JSON with jq, and read back exact native message IDs. Reconcile uncertain sends before retrying. Inspect deployed version for media, webhooks, and self-hosted routes. For Twenty, preserve the live integration and source-ID granularity; use chat-level archival only when requested."
