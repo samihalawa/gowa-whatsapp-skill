@@ -934,13 +934,11 @@ On failure inspect HTTP status, response code, selected device, deployed route a
 Expand this prompt in an agent conversation. Its setup lists devices only; the remaining calls are commented examples for the agent to adapt to the authorized task.
 
 ```text
-GOWA — Execute the WhatsApp task in context with direct curl, never WhatsApp Go MCP. Without a task, list devices only. If gowa-whatsapp-skill is in this environment's skill catalog, load it; otherwise continue with the bash setup. If curl cannot resolve cors.trigox.workers.dev, run the same commands on the Mac via Desktop Commander and do not retry the failing sandbox.
-Bash setup:
-A="${GOWA_BASIC_AUTH:?set GOWA_BASIC_AUTH to username:password}"; B='https://cors.trigox.workers.dev/https://gowa.megawebs.com'; C='https://gowa.megawebs.com'
+GOWA — Execute WhatsApp via direct curl; never WhatsApp Go MCP. No task: list devices. Use $gowa-whatsapp-skill if installed.
+A="${GOWA_BASIC_AUTH:?set GOWA_BASIC_AUTH}"; B='https://cors.trigox.workers.dev/https://gowa.megawebs.com'; C='https://gowa.megawebs.com'
 gowa(){ curl -fsS --connect-timeout 10 --max-time 60 -u "$A" "$@"; }
 gowa "$B/devices"
-Select the logged-in account holding the target chat. Set D=its literal device ID, J=full chat JID, P=international phone digits, M=authorized message from live context.
-Key examples after selection:
+Set D=logged-in device holding the chat; J=full JID; P=international digits; MID=native audio ID; M=authorized message.
 # gowa "$B/chats?device_id=$D&limit=100&offset=0"
 # gowa "$B/chat/$J/messages?device_id=$D&limit=100&offset=0"
 # gowa "$C/transcribe/chat/$J/messages?device_id=$D&limit=100&offset=0"
@@ -949,5 +947,5 @@ Key examples after selection:
 # gowa "$B/group/info?device_id=$D&group_id=$J"
 # gowa "$B/group/participants?device_id=$D&group_id=$J"
 # jq -n --arg phone "$J" --arg message "$M" '{phone:$phone,message:$message}' | gowa -H 'Content-Type: application/json' --data-binary @- "$B/send/message?device_id=$D"
-Derive all variables from the task and live reads; do not ask for values already discoverable. Person JIDs are {international-digits}@s.whatsapp.net; groups end @g.us. Preserve the live JID exactly. Page chats/history to the declared total, deduplicate native IDs, and read the complete relevant thread before sending. Use the normal chat route unless transcripts are requested; then use the direct same-domain C routes, where audio rows are enriched and standard GOWA remains unchanged. Scope every request after /devices. Send only within existing user authority; no test sends. Reconcile uncertain sends before retrying. Read back the exact native message ID, account, recipient and text; acknowledgement is not delivery. Inspect deployed contracts for media/webhooks; preserve current Twenty integration if CRM sync is requested. Report the verified result and precise remaining gap. EXECUTE NOW.
+Use B/chat normally; use C/transcribe/chat only for requested transcripts (same envelope, audio enriched), or C/transcribe/MID for one audio. Stock routes stay unchanged. Derive discoverable values from live reads. People end @s.whatsapp.net; groups end @g.us. Page to total, dedupe IDs, and read the full thread before sending. Scope after /devices. Only authorized sends; no tests. Reconcile uncertain sends before retrying. Read back exact ID/account/recipient/text; acknowledgement is not delivery. Inspect live media/webhook contracts; preserve the existing Twenty integration. Report result and exact gap. EXECUTE NOW.
 ```
