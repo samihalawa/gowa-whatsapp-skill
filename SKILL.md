@@ -1,6 +1,6 @@
 ---
 name: gowa-whatsapp-skill
-description: Use the GOWA REST API for WhatsApp chats, messages, groups, sends, number checks, multi-device sessions, webhooks, exhaustive history recovery, and idempotent Twenty CRM archival sync. Prefer direct curl over the WhatsApp Go MCP wrapper. If the current shell cannot resolve the CORS proxy, run the same curl on the Mac via Desktop Commander. On the managed instance, call GET /devices first and select the account that actually contains the target chat; device IDs can change. For Twenty, preserve the current live integration and source-ID granularity; use one generic External Activity per nonempty chat only for an explicitly requested chat-level archival backfill.
+description: Use the GOWA REST API for WhatsApp chats, messages, groups, sends, number checks, same-domain audio transcription, multi-device sessions, webhooks, exhaustive history recovery, and idempotent Twenty CRM archival sync. Prefer direct curl over the WhatsApp Go MCP wrapper. If the current shell cannot resolve the CORS proxy, run the same curl on the Mac via Desktop Commander. On the managed instance, call GET /devices first and select the account that actually contains the target chat; device IDs can change. For Twenty, preserve the current live integration and source-ID granularity; use one generic External Activity per nonempty chat only for an explicitly requested chat-level archival backfill.
 ---
 
 # GOWA WhatsApp Skill
@@ -17,7 +17,7 @@ The main production path for this environment is the managed shared instance.
 ## Fast Rules
 
 1. Always use direct `curl`.
-2. For the shared managed instance, route requests through `https://cors.trigox.workers.dev`.
+2. For stock shared-instance routes, use `https://cors.trigox.workers.dev`. For the same-domain transcription routes under `/transcribe/*`, call `https://gowa.megawebs.com` directly.
 3. Never use the WhatsApp Go MCP tools.
 4. Before a managed workflow, list `/devices`; select the logged-in device that holds the
    requested account/contact. Do not default to a device by its name.
@@ -29,18 +29,20 @@ The main production path for this environment is the managed shared instance.
 10. When reading chat history, use the full JID in the path.
 11. If the current shell cannot resolve `cors.trigox.workers.dev`, run the identical curl on the Mac via Desktop Commander. Do not retry the failing sandbox. Do not fall back to WhatsApp Go MCP.
 12. If `gowa-whatsapp-skill` is not in the environment skill catalog, use this skill's bash setup. Do not stall on a failed skill load.
+13. Use normal `/chat/{JID}/messages` for ordinary history reads. Use `/transcribe/chat/{JID}/messages` only when the task needs audio transcripts; it preserves the GOWA envelope and adds `transcription` only to audio rows.
+14. Do not modify or fork stock GOWA for transcription. The scoped edge route owns download, Whisper transcription, and caching while every standard GOWA route remains unchanged.
 
 ## Base Configuration
 
-Use these owner-specified defaults directly. No password-manager lookup or local `.env` is required. An explicit current task override wins.
+Use the managed URLs below and the already authorized `GOWA_BASIC_AUTH` from the runtime environment or the repository's ignored `.env`. An explicit current task override wins.
 
 ```bash
 export MANAGED_BASE_URL="https://gowa.megawebs.com"
 export MANAGED_PROXY="https://cors.trigox.workers.dev"
-export GOWA_BASIC_AUTH="samihalawa:659777908"
+: "${GOWA_BASIC_AUTH:?set GOWA_BASIC_AUTH to username:password}"
 ```
 
-The Basic Auth value above was verified with `GET /devices` on 2026-09-20. Keep it identical in the compact `goww` expansion. Never persist a device ID as a default: discover it at runtime. Existing `.env` overlays are optional; do not silently source a stale value over these defaults. Additional webhook variables are `WHATSAPP_WEBHOOK`, `WHATSAPP_WEBHOOK_SECRET`, and `WHATSAPP_WEBHOOK_EVENTS`.
+Set `GOWA_BASIC_AUTH` from the credentials authorized for the target managed instance. Do not hard-code it into prompts, repositories, or durable files. Never persist a device ID as a default: discover it at runtime. Additional webhook variables are `WHATSAPP_WEBHOOK`, `WHATSAPP_WEBHOOK_SECRET`, and `WHATSAPP_WEBHOOK_EVENTS`.
 
 Managed request template:
 
@@ -103,6 +105,9 @@ Important:
 - `GET /user/check`
 - `GET /group/info`
 - `GET /group/participants`
+- `GET /message/{message_id}/download`
+- `POST /transcribe/{message_id}`
+- `GET /transcribe/chat/{JID}/messages`
 
 ### Verified Behavioral Findings From Prior Runs
 
@@ -113,6 +118,9 @@ Important:
 - Some real-photo hosts and CDNs have failed with 403 or format errors when fetched by GOWA.
 - Self-hosted GOWA supports multi-device sessions via a `device` query parameter on app endpoints.
 - Calling self-hosted `/app/login` without a different `device` can return `ALREADY_LOGGED_IN` for the default session.
+- Managed media download requires `device_id`, the native message ID in the path, and `phone` as the full chat JID. Its JSON points to the stored media path; it does not return the audio bytes directly.
+- The managed `/transcribe/*` routes are scoped same-domain edge routes on `gowa.megawebs.com`. They forward the existing GOWA Basic Auth and do not intercept normal GOWA routes.
+- Transcripts are cached for 30 days by GOWA authorization scope, device, and immutable message ID. The current per-audio limit is 2 MB.
 
 ### Cataloged From Prior GOWA UI / Self-Hosted Notes
 
@@ -276,7 +284,55 @@ Response shape:
 }
 ```
 
-### 3. Send Text Message
+### 3. Read Chat History With Audio Transcriptions
+
+Use this opt-in route only when the task needs transcripts. It calls the normal GOWA history endpoint internally and returns the same envelope and pagination. Non-audio rows are unchanged; each audio row gains a `transcription` object.
+
+```bash
+JID="34611158350@s.whatsapp.net"
+curl -fsS --connect-timeout 10 --max-time 120 -u "$GOWA_BASIC_AUTH" \
+  "${MANAGED_BASE_URL}/transcribe/chat/${JID}/messages?device_id=${MANAGED_DEVICE_ID}&limit=100&offset=0"
+```
+
+Successful audio rows include:
+
+```json
+{
+  "transcription": {
+    "text": "Transcribed voice-note text",
+    "language": "es",
+    "durationMs": 26767,
+    "media": {
+      "type": "audio/ogg",
+      "size": 511488
+    }
+  }
+}
+```
+
+If one audio row cannot be transcribed, the chat response still succeeds and that row receives `transcription: { "error": "...", "code": "..." }`. Page to the declared total exactly as with normal history. Repeated reads reuse the 30-day message cache.
+
+### 4. Transcribe One Audio Message
+
+Use the native message ID and full chat JID from a fresh message-history read:
+
+```bash
+MESSAGE_ID="ACF380A45B7FA1BA23CC526C595143BE"
+JID="34611158350@s.whatsapp.net"
+curl -fsS --connect-timeout 10 --max-time 120 -u "$GOWA_BASIC_AUTH" -X POST \
+  "${MANAGED_BASE_URL}/transcribe/${MESSAGE_ID}?device_id=${MANAGED_DEVICE_ID}&phone=${JID}"
+```
+
+Required inputs:
+
+- `message_id`: native GOWA message ID in the path
+- `device_id`: freshly selected managed device
+- `phone`: full person or group chat JID containing the message
+- GOWA Basic Auth: the same `Authorization` header used by the stock API
+
+The response is a flat object containing `messageId`, `text`, optional `language`, `durationMs`, and `media`. Errors are `{ "error": "...", "code": "..." }`. Do not download the media manually before using this route: the Worker resolves `/message/{message_id}/download`, fetches the stored audio, transcribes it, and caches the result.
+
+### 5. Send Text Message
 
 Preferred working endpoint:
 
@@ -336,7 +392,7 @@ curl -fsS --connect-timeout 10 --max-time 60 -u "$GOWA_BASIC_AUTH" -X POST \
   }'
 ```
 
-### 4. Check Whether A Number Is On WhatsApp
+### 6. Check Whether A Number Is On WhatsApp
 
 ```bash
 curl -fsS --connect-timeout 10 --max-time 60 -u "$GOWA_BASIC_AUTH" \
@@ -355,14 +411,14 @@ Typical use:
 - check availability before outreach
 - convert a plain phone list into valid WhatsApp targets
 
-### 5. Group Info
+### 7. Group Info
 
 ```bash
 curl -fsS --connect-timeout 10 --max-time 60 -u "$GOWA_BASIC_AUTH" \
   "https://cors.trigox.workers.dev/https://gowa.megawebs.com/group/info?device_id=${MANAGED_DEVICE_ID}&group_id=120363411006743584@g.us"
 ```
 
-### 6. Group Participants
+### 8. Group Participants
 
 Some participants may have `@lid` identifiers. Preserve them as provider IDs; do not invent a phone number or merge a contact by display name.
 
@@ -705,6 +761,13 @@ This section is the broadest known GOWA map, combining working managed endpoints
 - `GET /chats`
 - `GET /chat/{JID}/messages`
 
+### Managed Transcription Edge Routes
+
+- `POST /transcribe/{message_id}`
+- `GET /transcribe/chat/{JID}/messages`
+
+These two paths are the opt-in same-domain Worker integration, not upstream stock GOWA endpoints.
+
 ### User
 
 - `GET /user/check`
@@ -737,6 +800,17 @@ curl -fsS --connect-timeout 10 --max-time 60 -u "$GOWA_BASIC_AUTH" \
 curl -fsS --connect-timeout 10 --max-time 60 -u "$GOWA_BASIC_AUTH" \
   "https://cors.trigox.workers.dev/https://gowa.megawebs.com/chat/34642609188@s.whatsapp.net/messages?device_id=${MANAGED_DEVICE_ID}&limit=50"
 ```
+
+### Workflow A2: Read A Chat With Voice-Note Transcripts
+
+After selecting the correct device and exact full JID, use the enriched history view instead of separately downloading each audio:
+
+```bash
+curl -fsS --connect-timeout 10 --max-time 120 -u "$GOWA_BASIC_AUTH" \
+  "${MANAGED_BASE_URL}/transcribe/chat/${JID}/messages?device_id=${MANAGED_DEVICE_ID}&limit=100&offset=0"
+```
+
+Use the normal pagination total and deduplicate native message IDs. Treat an audio row's transcription error as a failure for that row, not as proof that the rest of the history is unavailable. The standard `/chat/{JID}/messages` route remains the faster default when transcripts are not needed.
 
 ### Workflow B: Send Exactly Once And Read Back
 
@@ -798,6 +872,11 @@ curl -fsS --connect-timeout 10 --max-time 60 "$HOST/app/devices"
 | `not on whatsapp` | target number not registered | skip or verify number |
 | `403` while sending image | media host blocks server-side fetcher | rehost image on simpler public URL |
 | format/media error | unsupported media fetch or payload mismatch | verify direct URL and expected payload |
+| `INVALID_GOWA_REQUEST` | missing or malformed message ID, `device_id`, or chat JID | re-read the message and pass the native ID, selected device, and full JID |
+| `GOWA_DOWNLOAD_ERROR` | GOWA could not resolve the message media | verify the message belongs to the selected device and supplied chat JID |
+| `GOWA_MEDIA_ERROR` | stored GOWA media could not be fetched | inspect the returned media path and current managed deployment |
+| `AUDIO_TOO_LARGE` | voice note exceeds the current 2 MB Worker limit | report the exact row as untranscribed; do not claim complete transcription |
+| `TRANSCRIBE_ERROR` | Workers AI returned no usable transcript or failed | retry only when the failure is transient; the chat row remains explicitly marked |
 
 ## Quick Reference
 
@@ -805,6 +884,8 @@ curl -fsS --connect-timeout 10 --max-time 60 "$HOST/app/devices"
 |---|---|---|---|
 | List chats | GET | `/chats` | managed: confirmed `device_id` |
 | Read chat history | GET | `/chat/{JID}/messages` | full JID required |
+| Read history with transcripts | GET | `/transcribe/chat/{JID}/messages` | managed same-domain edge route; audio rows enriched |
+| Transcribe one audio | POST | `/transcribe/{message_id}` | needs `device_id`, full chat JID in `phone`, and GOWA auth |
 | Send text | POST | `/send/message` | managed working path |
 | Send text alt | POST | `/send/text` | simpler variant |
 | Check number | GET | `/user/check` | bare phone digits |
@@ -823,10 +904,12 @@ When asked to do anything with GOWA:
 
 1. Prefer the managed shared instance unless the user clearly points to a self-hosted base URL. If sandbox curl cannot resolve `cors.trigox.workers.dev`, run the identical commands on the Mac via Desktop Commander; never retry the failing sandbox and never fall back to WhatsApp Go MCP. If this skill is missing from the local catalog, use the bash setup below instead of stalling.
 2. If the task is chats, message history, user checks, group info, or plain text sending, use the managed verified endpoints above.
-3. For self-hosted login, multi-device, QR, or app status, inspect the deployed version; use modern `/devices` scoping or confirmed legacy `/app/*?device=...` routes.
-4. If the task is media sending, do not trust the remote image host blindly.
-5. If a route fails, do not invent a new variant. Compare against the verified map first.
-6. When synchronizing to Twenty, preserve the live integration and source-ID granularity. Use one External Activity per nonempty chat only for an explicitly requested chat-level archival backfill, and reconcile every native message ID before claiming completion.
+3. If the task asks for audio or voice-note transcripts, use the direct same-domain `/transcribe/*` routes. Prefer the enriched chat-history route for a conversation and the single-message POST for one known audio. Preserve native message IDs and report per-row errors explicitly.
+4. For ordinary message reads, keep using `/chat/{JID}/messages`; do not pay transcription latency or alter its response contract by default.
+5. For self-hosted login, multi-device, QR, or app status, inspect the deployed version; use modern `/devices` scoping or confirmed legacy `/app/*?device=...` routes.
+6. If the task is media sending, do not trust the remote image host blindly.
+7. If a route fails, do not invent a new variant. Compare against the verified map first.
+8. When synchronizing to Twenty, preserve the live integration and source-ID granularity. Use one External Activity per nonempty chat only for an explicitly requested chat-level archival backfill, and reconcile every native message ID before claiming completion.
 
 ## Hard Rule
 
@@ -842,6 +925,7 @@ On failure inspect HTTP status, response code, selected device, deployed route a
 
 - Upstream: https://github.com/aldinokemal/go-whatsapp-web-multidevice
 - API reference: https://github.com/aldinokemal/go-whatsapp-web-multidevice/tree/main/_autodocs/api-reference
+- Managed transcription Worker: https://github.com/samihalawa/stt
 - Source/install: https://github.com/samihalawa/gowa-whatsapp-skill
 - Install: `npx skills@latest add samihalawa/gowa-whatsapp-skill --global --all`
 
@@ -852,16 +936,18 @@ Expand this prompt in an agent conversation. Its setup lists devices only; the r
 ```text
 GOWA — Execute the WhatsApp task in context with direct curl, never WhatsApp Go MCP. Without a task, list devices only. If gowa-whatsapp-skill is in this environment's skill catalog, load it; otherwise continue with the bash setup. If curl cannot resolve cors.trigox.workers.dev, run the same commands on the Mac via Desktop Commander and do not retry the failing sandbox.
 Bash setup:
-A='samihalawa:659777908'; B='https://cors.trigox.workers.dev/https://gowa.megawebs.com'
+A="${GOWA_BASIC_AUTH:?set GOWA_BASIC_AUTH to username:password}"; B='https://cors.trigox.workers.dev/https://gowa.megawebs.com'; C='https://gowa.megawebs.com'
 gowa(){ curl -fsS --connect-timeout 10 --max-time 60 -u "$A" "$@"; }
 gowa "$B/devices"
 Select the logged-in account holding the target chat. Set D=its literal device ID, J=full chat JID, P=international phone digits, M=authorized message from live context.
 Key examples after selection:
 # gowa "$B/chats?device_id=$D&limit=100&offset=0"
 # gowa "$B/chat/$J/messages?device_id=$D&limit=100&offset=0"
+# gowa "$C/transcribe/chat/$J/messages?device_id=$D&limit=100&offset=0"
+# gowa -X POST "$C/transcribe/$MID?device_id=$D&phone=$J"
 # gowa "$B/user/check?device_id=$D&phone=$P"
 # gowa "$B/group/info?device_id=$D&group_id=$J"
 # gowa "$B/group/participants?device_id=$D&group_id=$J"
 # jq -n --arg phone "$J" --arg message "$M" '{phone:$phone,message:$message}' | gowa -H 'Content-Type: application/json' --data-binary @- "$B/send/message?device_id=$D"
-Derive all variables from the task and live reads; do not ask for values already discoverable. Person JIDs are {international-digits}@s.whatsapp.net; groups end @g.us. Preserve the live JID exactly. Page chats/history to the declared total, deduplicate native IDs, and read the complete relevant thread before sending. Scope every request after /devices. Send only within existing user authority; no test sends. Reconcile uncertain sends before retrying. Read back the exact native message ID, account, recipient and text; acknowledgement is not delivery. Inspect deployed contracts for media/webhooks; preserve current Twenty integration if CRM sync is requested. Report the verified result and precise remaining gap. EXECUTE NOW.
+Derive all variables from the task and live reads; do not ask for values already discoverable. Person JIDs are {international-digits}@s.whatsapp.net; groups end @g.us. Preserve the live JID exactly. Page chats/history to the declared total, deduplicate native IDs, and read the complete relevant thread before sending. Use the normal chat route unless transcripts are requested; then use the direct same-domain C routes, where audio rows are enriched and standard GOWA remains unchanged. Scope every request after /devices. Send only within existing user authority; no test sends. Reconcile uncertain sends before retrying. Read back the exact native message ID, account, recipient and text; acknowledgement is not delivery. Inspect deployed contracts for media/webhooks; preserve current Twenty integration if CRM sync is requested. Report the verified result and precise remaining gap. EXECUTE NOW.
 ```
