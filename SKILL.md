@@ -17,8 +17,9 @@ The main production path for this environment is the managed shared instance.
 ## Fast Rules
 
 1. Always use direct `curl`.
-2. For stock shared-instance routes, use `https://cors.trigox.workers.dev`. For the same-domain transcription routes under `/transcribe/*`, call `https://gowa.megawebs.com` directly.
-3. Never use the WhatsApp Go MCP tools.
+2. **Massive Context Ingestion (Zero-Churn Rule):** For chat audits, triage, and multi-contact reviews, dump complete message histories (all active chats up to the bounded 24h–72h window, e.g. 20–50 messages per chat) into context at once. Never micro-fetch chats message-by-message across separate tool round-trips.
+3. For stock shared-instance routes, use `https://cors.trigox.workers.dev`. For the same-domain transcription routes under `/transcribe/*`, call `https://gowa.megawebs.com` directly.
+4. Never use the WhatsApp Go MCP tools.
 4. Before a managed workflow, list `/devices`; select the logged-in device that holds the
    requested account/contact. Do not default to a device by its name.
 5. On managed GET requests, pass the confirmed `device_id` in the query string.
