@@ -932,7 +932,7 @@ On failure inspect HTTP status, response code, selected device, deployed route a
 - API reference: https://github.com/aldinokemal/go-whatsapp-web-multidevice/tree/main/_autodocs/api-reference
 - Managed transcription Worker: https://github.com/samihalawa/stt
 - Source/install: https://github.com/samihalawa/gowa-whatsapp-skill
-- Install: `npx skills@latest add samihalawa/gowa-whatsapp-skill --global --all`
+- Install: `npx skills@latest add samihalawa/gowa-whatsapp-skill --global --all`, then run step 8b of `skill-1build-2githubdeploy-3npxskillsinstall-skill` inline so claude.ai, Cowork and cloud sessions receive the same version through the `sami-skills` plugin.
 
 ## Compact `goww` Text Replacement
 
